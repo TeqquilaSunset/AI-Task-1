@@ -1,6 +1,6 @@
 POST https://api.z.ai/api/paas/v4/chat/completions HTTP/1.1
 Content-Type: application/json
-Authorization: Bearer не надо сюда смотреть
+Authorization: Bearer 47a12710eff5456189cbfc03becc63fb.YatmaurVUx6pUGkR
 
 {
     "model": "glm-4.5-flash",
