@@ -13,21 +13,9 @@ def main():
     # You can use either OpenAI API or an OpenAI-compatible service
 
     # Z.AI
-    # api_key = os.getenv("OPENAI_API_KEY")
-    # base_url = os.getenv("OPENAI_BASE_URL")
-    # model_name = "glm-4.6"
-
-
-    # Google Gemini
-    # api_key = os.getenv("OPENAI_API_KEY_GOOGLE")
-    # base_url = os.getenv("OPENAI_BASE_URL_GOOGLE")
-    # model_name = "gemini-2.5-flash"
-
-
-    # # Local OpenAI-compatible service (Qwen, Glm, gamma ...)
-    api_key = os.getenv("OPENAI_API_KEY_LOCAL")
-    base_url = os.getenv("OPENAI_BASE_URL_LOCAL")
-    model_name = "gemma3:27b"
+    api_key = os.getenv("OPENAI_API_KEY")
+    base_url = os.getenv("OPENAI_BASE_URL")
+    model_name = "glm-4.5-air"
 
     # Disable SSL certificate verification
     http_client = httpx.Client(verify=False)
@@ -88,7 +76,7 @@ def main():
                 model=model_name,  # Используемая модель
                 messages=conversation,  # История разговора
                 temperature=temp,
-                max_tokens=2048,
+                max_tokens=512,
                 # Note: The thinking parameter from GLM is removed as it's not compatible with OpenAI interface
             )
 
