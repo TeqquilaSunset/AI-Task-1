@@ -8,6 +8,51 @@ load_dotenv()
 
 SYSTEM_PROMPT = "Ты помощник, который помогает с любыми вопросами"
 
+def create_summary_with_llm(client, model_name, conversation_history):
+    """Create a summary of all previous user requests and AI responses using LLM"""
+    # Exclude the system prompt (index 0) and only include user and assistant messages
+    user_ai_messages = [msg for msg in conversation_history[1:] if msg["role"] in ["user", "assistant"]]
+
+    if len(user_ai_messages) == 0:
+        return "Нет истории диалога для создания резюме."
+
+    # Format the conversation history for the LLM to summarize
+    formatted_history = "Пожалуйста, создай краткое резюме следующей истории диалога. Выдели основные темы и детали диалога, которые могут понадобится при дальнейшем общении:\n\n"
+    for i, message in enumerate(user_ai_messages):
+        role = "Пользователь" if message["role"] == "user" else "AI"
+        content = message["content"]
+        formatted_history += f"{role}: {content}\n\n"
+
+    try:
+        # Send the formatted history to the LLM for summarization
+        response = client.chat.completions.create(
+            model=model_name,
+            messages=[{"role": "user", "content": formatted_history}],
+            temperature=0.3,
+            max_tokens=2048
+        )
+
+        summary = response.choices[0].message.content
+        return summary
+    except Exception as e:
+        return f"Ошибка при создании резюме: {e}"
+
+def print_context(system_prompt, conversation_history):
+    """Print the full context (system prompt + conversation history)"""
+    print("="*50)
+    print("ПОЛНЫЙ КОНТЕКСТ:")
+    print("="*50)
+    print(f"Системный промпт: {system_prompt}")
+    print("-"*50)
+    print("История разговора:")
+
+    for i, message in enumerate(conversation_history[1:], 1):  # Skip system prompt
+        role = message["role"].upper()
+        content = message["content"]
+        print(f"{i}. {role}: {content}")
+
+    print("="*50)
+
 def main():
     # Initialize OpenAI client
     # You can use either OpenAI API or an OpenAI-compatible service
@@ -64,6 +109,23 @@ def main():
                 print("Пожалуйста, укажите числовое значение для температуры, например: temp 0.7")
                 continue
 
+        # Check if the user wants to print the full context
+        if user_input.lower() == 'print':
+            print_context(SYSTEM_PROMPT, conversation)
+            continue  # Skip to the next iteration without sending to AI
+
+        # Check if the user wants to get a summary of previous requests
+        if user_input.lower() == 'summary':
+            print("Создание резюме предыдущей истории...")
+            summary = create_summary_with_llm(client, model_name, conversation)
+            print(f"\nРезюме: {summary}")
+
+            # Replace conversation history with system prompt and summary only
+            system_message = conversation[0]  # Keep the system prompt
+            summary_message = f"Суммаризация предыдущего разговора: {summary}"
+            conversation = [system_message, {"role": "assistant", "content": summary_message}]
+            continue  # Skip to the next iteration without sending to AI
+
         # Добавление запроса в историю диалога
         conversation.append({"role": "user", "content": user_input})
 
@@ -76,7 +138,7 @@ def main():
                 model=model_name,  # Используемая модель
                 messages=conversation,  # История разговора
                 temperature=temp,
-                max_tokens=512,
+                max_tokens=2048,
                 # Note: The thinking parameter from GLM is removed as it's not compatible with OpenAI interface
             )
 
