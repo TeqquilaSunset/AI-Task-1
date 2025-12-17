@@ -217,10 +217,73 @@ async def convert_temperature(value: float, from_unit: str = "celsius", to_unit:
     
     return f"{value} {symbols[from_unit]} = {result:.2f} {symbols[to_unit]}"
 
+import json
+from datetime import datetime
+from pathlib import Path
+
+@mcp.tool()
+async def save_weather_data(data: str, filename: str = "weather_data.json") -> str:
+    """Сохранить погодные данные в JSON файл.
+
+    Args:
+        data: Погодные данные в формате строки JSON
+        filename: Имя файла для сохранения (по умолчанию "weather_data.json")
+    """
+    log.info(f"Сохранение погодных данных в файл: {filename}")
+
+    try:
+        # Parse the input data as JSON
+        parsed_data = json.loads(data)
+
+        # Add timestamp to the data
+        if isinstance(parsed_data, dict):
+            parsed_data["timestamp"] = datetime.now().isoformat()
+            weather_records = [parsed_data]
+        elif isinstance(parsed_data, list):
+            for record in parsed_data:
+                record["timestamp"] = datetime.now().isoformat()
+            weather_records = parsed_data
+        else:
+            return "Ошибка: данные должны быть в формате JSON объекта или массива"
+
+        # Define file path
+        file_path = Path(filename)
+
+        # Read existing data if file exists
+        existing_data = []
+        if file_path.exists():
+            try:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    existing_data = json.load(f)
+                if not isinstance(existing_data, list):
+                    existing_data = []
+            except json.JSONDecodeError:
+                existing_data = []
+
+        # Append new records
+        existing_data.extend(weather_records)
+
+        # Write back to file
+        with open(file_path, 'w', encoding='utf-8') as f:
+            json.dump(existing_data, f, ensure_ascii=False, indent=2)
+
+        log.info(f"Погодные данные успешно сохранены в {filename}")
+        return f"Данные успешно сохранены в {filename}. Всего записей: {len(existing_data)}"
+
+    except json.JSONDecodeError as e:
+        error_msg = f"Ошибка парсинга JSON: {e}"
+        log.error(error_msg)
+        return error_msg
+    except Exception as e:
+        error_msg = f"Ошибка при сохранении данных: {e}"
+        log.exception(error_msg)
+        return error_msg
+
+
 @mcp.tool()
 async def stub_tool(input: str) -> str:
     """Простая заглушка для тестов.
-    
+
     Args:
         input: Любой текст для обработки
     """
