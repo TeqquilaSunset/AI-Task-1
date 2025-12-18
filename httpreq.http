@@ -27,3 +27,6 @@ Authorization: 43e13e521e434ab691b0487abab934bf.b8QtdHyIimzVtlTj
 
 ###
 GET http://api.openweathermap.org/data/2.5/weather?q=Moscow&appid=b52d0750fb10146367ad7a8a141703db HTTP/1.1
+
+###
+GET http://localhost:8002/messages/ HTTP/1.1

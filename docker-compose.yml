@@ -1,0 +1,11 @@
+services:
+  ddg-mcp:
+    image: mekayelanik/duckduckgo-mcp:stable   # ← HTTP-совместимый образ
+    container_name: ddg-mcp
+    restart: unless-stopped
+    ports:
+      - "9011:8020"        # ← проброс на хост
+    environment:
+      PORT: 8020            # порт внутри контейнера
+      PROTOCOL: SHTTP       # обычный HTTP (не SSE)
+      CORS: "*"             # разрешаем запросы с хоста
