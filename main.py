@@ -678,15 +678,15 @@ class ChatClient:
 async def interactive_chat(client: ChatClient) -> None:
     """Интерактивный чат-цикл."""
     print("=" * 60)
-    print("🤖 Чат-клиент с MCP инструментами")
+    print("ROBOT Чат-клиент с MCP инструментами")
     print("Команды: quit/exit, save <имя>, load <имя>, temp <0-2>, clear, print")
     print("=" * 60)
 
     while True:
         try:
-            user_input = input("\n👤 Вы: ").strip()
+            user_input = input("\nUSER Вы: ").strip()
         except (EOFError, KeyboardInterrupt):
-            print("\n\n👋 До свидания!")
+            print("\n\nGOODBYE До свидания!")
             break
 
         if not user_input:
@@ -694,16 +694,16 @@ async def interactive_chat(client: ChatClient) -> None:
 
         # Обработка команд
         if user_input.lower() in ("quit", "exit"):
-            print("👋 До свидания!")
+            print("GOODBYE До свидания!")
             break
 
         if user_input.lower() == "clear":
             client.conversation = [{"role": "system", "content": SYSTEM_PROMPT}]
-            print("🗑️ История очищена")
+            print("CLEARED История очищена")
             continue
 
         if user_input.lower() == "print":
-            print("=" * 50, "📋 История разговора:", "=" * 50, sep="\n")
+            print("=" * 50, "HISTORY История разговора:", "=" * 50, sep="\n")
             for i, msg in enumerate(client.conversation[1:], 1):
                 print(f"{i}. {msg['role'].upper()}: {msg['content'][:100]}{'...' if len(msg['content']) > 100 else ''}")
             print("=" * 50)
@@ -712,7 +712,7 @@ async def interactive_chat(client: ChatClient) -> None:
         if user_input.lower().startswith("save "):
             name = user_input[5:].strip()
             path = save_conversation(client.conversation, name)
-            print(f"💾 Сохранено: {path}")
+            print(f"SAVED Сохранено: {path}")
             continue
 
         if user_input.lower().startswith("load "):
@@ -720,9 +720,9 @@ async def interactive_chat(client: ChatClient) -> None:
             loaded, msg = load_conversation(name)
             if loaded:
                 client.conversation = loaded
-                print(f"📂 Загружено: {msg}")
+                print(f"LOADED Загружено: {msg}")
             else:
-                print(f"❌ {msg}")
+                print(f"ERROR {msg}")
             continue
 
         if user_input.lower().startswith("temp "):
@@ -730,11 +730,11 @@ async def interactive_chat(client: ChatClient) -> None:
                 temp = float(user_input[5:].strip())
                 if 0.0 <= temp <= 2.0:
                     client.temperature = temp
-                    print(f"🌡️ Температура установлена: {temp}")
+                    print(f"THERMOMETER Температура установлена: {temp}")
                 else:
-                    print("⚠️ Температура должна быть от 0 до 2")
+                    print("WARNING Температура должна быть от 0 до 2")
             except ValueError:
-                print("⚠️ Пример: temp 0.7")
+                print("WARNING Пример: temp 0.7")
             continue
 
         # Обработка обычного запроса
@@ -745,15 +745,15 @@ async def interactive_chat(client: ChatClient) -> None:
             response = await client.process_query(user_input)
 
             # Выводим ответ
-            print(f"\n🤖 Ассистент: {response}")
-            
+            print(f"\nASSISTANT Ассистент: {response}")
+
             # Статистика
             elapsed = (datetime.now() - start_time).total_seconds()
             total_tools = len(client.mcp_client.available_tools) + len(client.docker_mcp_client.available_tools)
-            print(f"⏱️ Время: {elapsed:.2f}с | Инструментов: {total_tools} (STDIO: {len(client.mcp_client.available_tools)}, Docker: {len(client.docker_mcp_client.available_tools)})")
-            
+            print(f"TIME Время: {elapsed:.2f}с | Инструментов: {total_tools} (STDIO: {len(client.mcp_client.available_tools)}, Docker: {len(client.docker_mcp_client.available_tools)})")
+
         except Exception as exc:
-            error_msg = f"❌ Ошибка: {exc}"
+            error_msg = f"ERROR Ошибка: {exc}"
             log.error(error_msg)
             print(error_msg)
 
@@ -771,9 +771,9 @@ async def main() -> None:
         await interactive_chat(client)
         
     except KeyboardInterrupt:
-        print("\n\n🛑 Прервано пользователем")
+        print("\n\nSTOP Прервано пользователем")
     except Exception as exc:
-        error_msg = f"💥 Критическая ошибка: {exc}"
+        error_msg = f"CRITICAL Критическая ошибка: {exc}"
         log.exception(error_msg)
         print(error_msg)
     finally:

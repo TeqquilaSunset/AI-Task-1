@@ -14,6 +14,9 @@ import httpx
 import mcp.types as types
 from mcp.server.fastmcp import FastMCP
 from dotenv import load_dotenv
+import docker
+import tempfile
+import subprocess
 
 # --------------------  ЛОГИРОВАНИЕ  --------------------
 # Важно: пишем только в stderr для STDIO-based серверов
@@ -289,6 +292,102 @@ async def stub_tool(input: str) -> str:
     """
     log.info(f"Вызвана заглушка с input: {input}")
     return f"stub-tool выполнен. Аргументы: {input}"
+
+# --------------------  DOCKER PYTHON EXECUTION TOOL  --------------------
+@mcp.tool()
+async def execute_python_code(code: str) -> str:
+    """Выполнить Python код в Docker контейнере.
+
+    Args:
+        code: Python код для выполнения
+    """
+    log.info("Выполнение Python кода в Docker контейнере...")
+
+    try:
+        # Initialize Docker client
+        client = docker.from_env()
+
+        # Check if the Python image exists, pull it if not
+        try:
+            client.images.get("python:3.9-slim")
+        except docker.errors.ImageNotFound:
+            log.info("Образ python:3.9-slim не найден, скачиваем...")
+            client.images.pull("python:3.9-slim")
+
+        # Create a temporary Python file with the code
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+            f.write(code)
+            temp_file_path = f.name
+
+        try:
+            # Run the code in a Python Docker container and handle timeout with a different approach
+            # Using python:3.9-slim as a lightweight Python environment
+            import time
+
+            # For timeout handling, we'll use a different approach since the timeout parameter might not be available
+            container = None
+            container = client.containers.run(
+                "python:3.9-slim",
+                f"python {f'/tmp/{os.path.basename(temp_file_path)}'}",
+                remove=False,  # We'll handle removal ourselves
+                volumes={os.path.dirname(temp_file_path): {'bind': '/tmp', 'mode': 'ro'}},
+                working_dir="/tmp",
+                stdout=True,
+                stderr=True,
+                detach=True  # Run in background to manage it ourselves
+            )
+
+            # Wait for container to finish with a timeout approach
+            start_time = time.time()
+            while container.status != 'exited' and time.time() - start_time < 30:
+                time.sleep(0.5)
+                container.reload()
+
+            # If container is still running after timeout, stop it
+            if container.status != 'exited':
+                container.stop()
+                container.remove()
+                return "Превышено время выполнения (30 секунд)"
+
+            # Get logs and remove the container
+            logs = container.logs(stdout=True, stderr=True)
+            container.remove()
+
+            # Decode the logs
+            output = logs.decode('utf-8')
+            log.info(f"Код успешно выполнен. Вывод: {output[:200]}...")
+            return output if output else "Код выполнен без вывода"
+
+        except docker.errors.ContainerError as e:
+            error_output = e.stderr.decode('utf-8') if e.stderr else str(e)
+            log.error(f"Ошибка выполнения кода в Docker: {error_output}")
+            return f"Ошибка выполнения кода: {error_output}"
+
+        except docker.errors.ImageNotFound:
+            error_msg = "Docker образ 'python:3.9-slim' не найден. Пожалуйста, выполните: docker pull python:3.9-slim"
+            log.error(error_msg)
+            return error_msg
+
+        except Exception as e:
+            error_msg = f"Ошибка при выполнении Python кода в Docker: {str(e)}"
+            log.error(error_msg)
+            # Make sure container is removed even if there's an error
+            if container is not None:
+                try:
+                    container.remove(force=True)
+                except:
+                    pass  # Container might not exist or already be removed
+            return error_msg
+
+        finally:
+            # Clean up the temporary file
+            if os.path.exists(temp_file_path):
+                os.remove(temp_file_path)
+
+    except Exception as e:
+        error_msg = f"Ошибка инициализации Docker клиента: {str(e)}"
+        log.error(error_msg)
+        return error_msg
 
 # --------------------  ЗАПУСК СЕРВЕРА  --------------------
 def main():
