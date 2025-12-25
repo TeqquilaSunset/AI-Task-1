@@ -154,6 +154,9 @@ class RAGService:
         self.embedding_model = embedding_model
         self.ollama_host = ollama_host
         self.qdrant_client = QdrantClient(host=qdrant_host, port=qdrant_port)
+        self.reranker_enabled = False  # По умолчанию реранкер выключен
+        self.relevance_threshold = 0.1  # Порог релевантности по умолчанию
+        self.reranker_model = "dengcao/Qwen3-Reranker-8B:Q3_K_M"  # Модель реранкера
 
     def generate_embedding(self, text: str) -> list[float]:
         """Генерация эмбеддинга для текста через Ollama"""
@@ -231,12 +234,86 @@ class RAGService:
                 log.info(f"RAG: Результат #{i+1} - Релевантность: {score:.3f}, Текст: '{doc_info['text'][:100]}...'")
                 similar_docs.append(doc_info)
 
-            return similar_docs
+            # Применяем реранкер, если он включен
+            if self.reranker_enabled and similar_docs:
+                log.info(f"RAG: Применение реранкера к {len(similar_docs)} документам")
+                similar_docs = self.rerank_documents(query, similar_docs)
+                log.info(f"RAG: После реранкинга осталось {len(similar_docs)} документов")
+
+            # Применяем фильтрацию по порогу релевантности независимо от реранкера
+            filtered_docs = [doc for doc in similar_docs if doc["score"] >= self.relevance_threshold]
+            log.info(f"RAG: После фильтрации по порогу {self.relevance_threshold} осталось {len(filtered_docs)} документов")
+
+            return filtered_docs
         except Exception as e:
             log.error(f"Ошибка при поиске похожих документов: {e}")
             return []
 
-    def get_rag_response(self, query: str, top_k: int = 5) -> str:
+    def rerank_documents(self, query: str, documents: list[dict]) -> list[dict]:
+        """Реранкинг документов с использованием упрощенного алгоритма (для производительности)"""
+        try:
+            log.info(f"RAG: Запуск реранкера для {len(documents)} документов")
+
+            # Для улучшения производительности используем упрощенный алгоритм реранкинга
+            # вместо вызова модели для каждого документа
+
+            reranked_docs = []
+            for i, doc in enumerate(documents):
+                original_score = doc["score"]
+                text_content = doc.get("text", "") or doc.get("full_text", "") or str(doc.get("payload", ""))
+
+                # Простой алгоритм реранкинга:
+                # 1. Длина текста (длинные релевантные тексты могут быть более ценными)
+                text_length_score = min(len(text_content) / 1000, 0.3)  # Максимум +0.3 за длину
+
+                # 2. Совпадение слов из запроса в тексте
+                query_words = set(query.lower().split())
+                text_words = set(text_content.lower().split())
+                overlap_score = len(query_words.intersection(text_words)) / max(len(query_words), 1) * 0.4  # Максимум +0.4 за совпадение
+
+                # 3. Комбинируем оригинальный скор с новыми метриками
+                reranked_score = original_score + text_length_score + overlap_score
+                # Ограничиваем максимальный скор значением 1.0
+                reranked_score = min(reranked_score, 1.0)
+
+                # Обновляем score документа
+                updated_doc = doc.copy()
+                updated_doc["score"] = reranked_score
+                reranked_docs.append(updated_doc)
+
+            # Сортируем по новому скору
+            reranked_docs.sort(key=lambda x: x["score"], reverse=True)
+
+            # Применяем порог фильтрации
+            filtered_docs = [doc for doc in reranked_docs if doc["score"] >= self.relevance_threshold]
+
+            log.info(f"RAG: После реранкинга и фильтрации осталось {len(filtered_docs)} документов")
+
+            # Логирование результатов реранкинга
+            for i, doc in enumerate(filtered_docs):
+                log.info(f"RAG: Реранк # {i+1} - Релевантность: {doc['score']:.3f}, Текст: '{doc['text'][:100]}...'")
+
+            return filtered_docs
+
+        except Exception as e:
+            log.error(f"Ошибка при реранкинге документов: {e}")
+            # Возвращаем оригинальные документы, если реранкинг не удался
+            return [doc for doc in documents if doc["score"] >= self.relevance_threshold]
+
+    def toggle_reranker(self) -> bool:
+        """Переключение состояния реранкера"""
+        self.reranker_enabled = not self.reranker_enabled
+        status = "включен" if self.reranker_enabled else "выключен"
+        log.info(f"RAG: Реранкер {status}")
+        return self.reranker_enabled
+
+    def set_relevance_threshold(self, threshold: float) -> float:
+        """Установка порога релевантности"""
+        self.relevance_threshold = max(0.0, min(1.0, threshold))  # Ограничиваем в диапазоне [0, 1]
+        log.info(f"RAG: Установлен порог релевантности: {self.relevance_threshold}")
+        return self.relevance_threshold
+
+    def get_rag_response(self, query: str, top_k: int = 10) -> str:
         """Получение ответа с использованием RAG"""
         try:
             # Поиск релевантных чанков
@@ -593,41 +670,94 @@ class ChatClient:
         """Обрабатывает запрос пользователя с использованием доступных инструментов."""
         log.info(f"Обработка запроса: {query[:50]}...")
 
-        # Проверяем, содержит ли запрос команду для включения/выключения RAG
+        # Проверяем, содержит ли запрос команду для управления RAG и реранкером
         if query.lower().startswith('/rag'):
             # Извлекаем команду и текст запроса
-            parts = query.split(' ', 1)
+            parts = query.split(' ', 2)  # Разбиваем на 3 части: команда, опционально подкоманда, опционально значение
             if len(parts) == 1:
-                # Просто команда /rag - переключаем состояние
+                # Просто команда /rag - переключаем состояние RAG
                 self.use_rag = not self.use_rag
                 status = "включён" if self.use_rag else "выключен"
                 return f"RAG режим {status}."
-            else:
-                # /rag с текстом запроса - обрабатываем с RAG
-                actual_query = parts[1]
-                rag_prompt = self.rag_service.get_rag_response(actual_query)
+            elif len(parts) == 2:
+                # Проверяем, является ли второй элемент подкомандой
+                if parts[1].lower() == 'rerank':
+                    # Команда /rag rerank - переключаем реранкер
+                    rerank_status = self.rag_service.toggle_reranker()
+                    status = "включён" if rerank_status else "выключен"
+                    return f"Реранкер {status}."
+                elif parts[1].lower().startswith('threshold:'):
+                    # Команда /rag threshold:value - устанавливаем порог
+                    try:
+                        threshold_value = float(parts[1].split(':', 1)[1])
+                        new_threshold = self.rag_service.set_relevance_threshold(threshold_value)
+                        return f"Порог релевантности установлен: {new_threshold}."
+                    except (ValueError, IndexError):
+                        return f"Неверный формат порога. Используйте: /rag threshold:0.5"
+                else:
+                    # /rag с текстом запроса - обрабатываем с RAG
+                    actual_query = parts[1]
+                    rag_prompt = self.rag_service.get_rag_response(actual_query)
 
-                # Отправляем RAG-запрос к LLM
-                messages = self.conversation + [{"role": "user", "content": rag_prompt}]
+                    # Отправляем RAG-запрос к LLM
+                    messages = self.conversation + [{"role": "user", "content": rag_prompt}]
 
-                try:
-                    response = await self.openai_client.chat.completions.create(
-                        model=self.model_name,
-                        messages=messages,
-                        temperature=self.temperature,
-                        max_tokens=2048,
-                    )
-                    content = response.choices[0].message.content or ""
+                    try:
+                        response = await self.openai_client.chat.completions.create(
+                            model=self.model_name,
+                            messages=messages,
+                            temperature=self.temperature,
+                            max_tokens=2048,
+                        )
+                        content = response.choices[0].message.content or ""
 
-                    # Добавляем оригинальный запрос и ответ в историю разговора
-                    self.conversation.append({"role": "user", "content": actual_query})
-                    self.conversation.append({"role": "assistant", "content": content})
+                        # Добавляем оригинальный запрос и ответ в историю разговора
+                        self.conversation.append({"role": "user", "content": actual_query})
+                        self.conversation.append({"role": "assistant", "content": content})
 
-                    return content
-                except Exception as exc:
-                    error_msg = f"Ошибка при обработке RAG запроса: {exc}"
-                    log.error(error_msg)
-                    return f"Извините, произошла ошибка при обработке RAG запроса: {exc}"
+                        return content
+                    except Exception as exc:
+                        error_msg = f"Ошибка при обработке RAG запроса: {exc}"
+                        log.error(error_msg)
+                        return f"Извините, произошла ошибка при обработке RAG запроса: {exc}"
+            else:  # len(parts) == 3
+                # Команда с подкомандой и значением, например: /rag threshold 0.5
+                subcommand = parts[1].lower()
+                value = parts[2]
+
+                if subcommand == 'threshold':
+                    try:
+                        threshold_value = float(value)
+                        new_threshold = self.rag_service.set_relevance_threshold(threshold_value)
+                        return f"Порог релевантности установлен: {new_threshold}."
+                    except ValueError:
+                        return f"Неверное значение порога. Используйте числовое значение от 0 до 1."
+                else:
+                    # /rag с текстом запроса - обрабатываем с RAG
+                    actual_query = f"{parts[1]} {parts[2]}"
+                    rag_prompt = self.rag_service.get_rag_response(actual_query)
+
+                    # Отправляем RAG-запрос к LLM
+                    messages = self.conversation + [{"role": "user", "content": rag_prompt}]
+
+                    try:
+                        response = await self.openai_client.chat.completions.create(
+                            model=self.model_name,
+                            messages=messages,
+                            temperature=self.temperature,
+                            max_tokens=2048,
+                        )
+                        content = response.choices[0].message.content or ""
+
+                        # Добавляем оригинальный запрос и ответ в историю разговора
+                        self.conversation.append({"role": "user", "content": actual_query})
+                        self.conversation.append({"role": "assistant", "content": content})
+
+                        return content
+                    except Exception as exc:
+                        error_msg = f"Ошибка при обработке RAG запроса: {exc}"
+                        log.error(error_msg)
+                        return f"Извините, произошла ошибка при обработке RAG запроса: {exc}"
 
         # Если RAG включен и запрос не начинается с /rag, используем RAG для обычного запроса
         elif self.use_rag:
@@ -874,7 +1004,7 @@ async def interactive_chat(client: ChatClient) -> None:
     print("=" * 60)
     print("ROBOT Чат-клиент с MCP инструментами")
     print("Команды: quit/exit, save <имя>, load <имя>, temp <0-2>, clear, print")
-    print("RAG команды: /rag (вкл/выкл), /rag <вопрос> (вопрос с RAG)")
+    print("RAG команды: /rag (вкл/выкл), /rag <вопрос> (вопрос с RAG), /rag rerank (вкл/выкл реранкер), /rag threshold <значение> (установить порог)")
     print("=" * 60)
 
     while True:
